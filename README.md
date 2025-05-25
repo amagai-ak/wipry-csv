@@ -59,4 +59,3 @@ sudo chroot ./arm64-root /root/wipry-csv/wipry-csv -c -2
 ### Note
 
 When deleting the emulation directories, don't forget to unmont /dev and /sys first.
-
