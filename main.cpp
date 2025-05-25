@@ -321,7 +321,7 @@ int main(int argc, char *argv[]) {
 
 	// getopt
 	ntimes = 0;
-	while((c = getopt(argc, argv, "chD256n:")) != -1) {
+	while((c = getopt(argc, argv, "ch256n:")) != -1) {
 		switch(c) {
 			case 'h':
 				helptext();
@@ -334,9 +334,6 @@ int main(int argc, char *argv[]) {
 				break;
 			case '6':
 				band = 6;
-				break;
-			case 'D':
-				band = 25;
 				break;
 			case 'c':
 				csvmode = true;
@@ -429,7 +426,6 @@ int main(int argc, char *argv[]) {
 		//Prevent CPU spinlock
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
        }
-
 
 	// stop the data
 	std::cerr << "Stopping rssi data stream." << std::endl;
