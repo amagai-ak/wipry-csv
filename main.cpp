@@ -1,12 +1,24 @@
+/**
+ * @file main.cpp
+ * @brief 
+ * @version 0.1
+ * @date 2025-05-25
+ * 
+ * @copyright Copyright (c) 2025
+ * 
+ */
 #include "WiPryClarity.h"
 #include <iostream>
+#include <iomanip>
 #include <chrono>
 #include <thread>
 #include <signal.h>
 #include <cstring>
 
-/*
+#include <getopt.h>
 
+// 	original source: https://github.com/bryanward-net/wipry-lp
+/*
     wipry-lp
 
     Outputs Oscium WiPry spectrum analysis data in Influx Line Protocol format
@@ -15,15 +27,16 @@
 
 */
 
+// modified by amagai
 
-std::string VERSION = "v1.1.0";
+
+std::string VERSION = "v0.1.0";
 
 
 using namespace oscium;
 WiPryClarity* wipryClarity = nullptr;
 
-sig_atomic_t signaled = 0;
-bool run = true;
+static volatile bool run = true;
 unsigned int band;
 std::string serial;
 
@@ -43,12 +56,26 @@ float freqLow6, freqHigh6;
 
 
 // This the delegate class that receives the events from the WiPryClarity object.
- class MyDelegate : public WiPryClarityDelegate {
+class MyDelegate : public WiPryClarityDelegate {
+protected:
+	int rcvCount = 0;
+	int rcvLimit = 0;
+	bool csvmode = false;
+
 public:
+	void setRcvLimit(int n) {
+		rcvLimit = n;
+	}
+
+	void setCsvMode(bool mode) {
+		csvmode = mode;
+	}
+
 	void wipryClarityDidConnect(WiPryClarity *aWipryClarity) {
 		std::cerr << "Connected to device." << std::endl;
 		isConnected = true;
 		connectionProcessComplete = true;
+		rcvCount = 0;
 
 		float min, max, noisefloor;
 		float freqLow, freqHigh;
@@ -133,81 +160,116 @@ public:
 	*/
 
 
-	void wipryClarityDidReceiveRSSIData(WiPryClarity *aWipryClarity, WiPryClarity::DataType dataType, std::vector<float> rssiData) {
-                long long timens = std::chrono::time_point_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now()).time_since_epoch().count();
+	// RSSIをInfluxDB Line Protocol形式で出力する
+	void dumpRSSI_lp(WiPryClarity::DataType dataType, std::vector<float> rssiData, float freqLow, float freqHigh, long long timens) {
+		float stepsize = ( (freqHigh - freqLow) / (int)rssiData.size() );
+
+		std::cout << "wipry,serial=" << serial;
 		switch (dataType)
 		{
 			case oscium::WiPryClarity::DataType::RSSI_2_4GHZ:
-			{
-				std::cerr << "2.4 GHz rssi data with " << (int)rssiData.size() << " points" << std::endl;
-				float stepsize = ( (freqHigh2 - freqLow2) / (int)rssiData.size() );
-				std::cout << "wipry,serial=" << serial << ",band=2 ";
-				for (int p=0; p < (int)rssiData.size(); p++) {
-					//std::cerr << rssiData[p] << " ";
-					//Truncate
-					if (p < ((int)rssiData.size() - 1))
-						std::cout << (freqLow2 + p * stepsize) << "=" <<(int)rssiData[p] << ",";
-					else
-						std::cout << (freqLow2 + p * stepsize) << "=" <<(int)rssiData[p];
-				}
-                                std::cout << " " << timens << std::endl;
-			}
-			break;
+				std::cout << ",band=2 ";
+				break;
 			case oscium::WiPryClarity::DataType::RSSI_5GHZ:
-			{
-				std::cerr << "5 GHz rssi data with " << (int)rssiData.size() << " points" << std::endl;
-				float stepsize = ( (freqHigh5 - freqLow5) / (int)rssiData.size() );
-				std::cout << "wipry,serial=" << serial << ",band=5 ";
-				for (int p=0; p < (int)rssiData.size(); p++) {
-					//std::cerr << rssiData[p] << " ";
-					//Truncate
-					if (p < ((int)rssiData.size() - 1))
-						std::cout << (freqLow5 + p * stepsize) << "=" <<(int)rssiData[p] << ",";
-					else
-						std::cout << (freqLow5 + p * stepsize) << "=" <<(int)rssiData[p];
-				}
-                                std::cout << " " << timens << std::endl;
-			}
-			break;
-/*
-			case oscium::WiPryClarity::DataType::RSSI_DUAL25:
-			{
-				std::cerr << "Dual band rssi data with " << (int)rssiData.size() << " points" << std::endl;
-				for (int p=0; p < (int)rssiData.size(); p++) {
-					//std::cerr << rssiData[p] << " ";
-					//Truncate
-					std::cerr << (int)rssiData[p] << " ";
-				}
-                                std::cout << " " << timens << std::endl;
-			}
-			break;
-*/
+				std::cout << ",band=5 ";
+				break;
 			case oscium::WiPryClarity::DataType::RSSI_6E:
-			{
-				std::cerr << "6 GHz rssi data with " << (int)rssiData.size() << " points" << std::endl;
-				float stepsize = ( (freqHigh6 - freqLow6) / (int)rssiData.size() );
-				std::cout << "wipry,serial=" << serial << ",band=6 ";
-				for (int p=0; p < (int)rssiData.size(); p++) {
-					//std::cerr << rssiData[p] << " ";
-					//Truncate
-					if (p < ((int)rssiData.size() - 1))
-						std::cout << (freqLow6 + p * stepsize) << "=" <<(int)rssiData[p] << ",";
-					else
-						std::cout << (freqLow6 + p * stepsize) << "=" <<(int)rssiData[p];
-				}
-                                std::cout << " " << timens << std::endl;
-			}
-			break;
-
+				std::cout << ",band=6 ";
+				break;
 			default:
 				break;
 		}
 
+		for (int p=0; p < (int)rssiData.size(); p++) {
+			if (p < ((int)rssiData.size() - 1))
+				std::cout << (freqLow + p * stepsize) << "=" <<(int)rssiData[p] << ",";
+			else
+				std::cout << (freqLow + p * stepsize) << "=" <<(int)rssiData[p];
+		}
+		std::cout << " " << timens << std::endl;
+	}
+
+	// RSSIをCSV形式で出力する
+	// CSVは，count, timestamp, band, freq_low, freq_high, step, points, rssi1, rssi2, ...
+	void dumpRSSI_csv(WiPryClarity::DataType dataType, std::vector<float> rssiData, float freqLow, float freqHigh, long long timens) {
+		float stepsize = ( (freqHigh - freqLow) / (int)rssiData.size() );
+		double time_ms = (double)timens / 1000000.0;
+		std::cout << rcvCount << ",";
+		// time_msは，小数点以下3桁まで表示
+		std::cout << std::fixed << std::setprecision(3) << time_ms << ",";
+		switch (dataType)
+		{
+			case oscium::WiPryClarity::DataType::RSSI_2_4GHZ:
+				std::cout << "2,";
+				break;
+			case oscium::WiPryClarity::DataType::RSSI_5GHZ:
+				std::cout << "5,";
+				break;
+			case oscium::WiPryClarity::DataType::RSSI_6E:
+				std::cout << "6,";
+				break;
+			default:
+				break;
+		}
+		std::cout << freqLow << ",";
+		std::cout << freqHigh << ",";
+		std::cout << stepsize << ",";
+		std::cout << (int)rssiData.size() << ",";
+		for (int p=0; p < (int)rssiData.size(); p++) {
+			if (p < ((int)rssiData.size() - 1))
+				std::cout << (int)rssiData[p] << ",";
+			else
+				std::cout << (int)rssiData[p];
+		}
+		std::cout << std::endl;
+	}
+
+	// データ受信時に呼ばれる処理
+	void wipryClarityDidReceiveRSSIData(WiPryClarity *aWipryClarity, WiPryClarity::DataType dataType, std::vector<float> rssiData) {
+		long long timens = std::chrono::time_point_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now()).time_since_epoch().count();
+		float freqLow, freqHigh;
+		if( run == false ) {
+			// std::cerr << "Received data after stop command. Ignoring." << std::endl;
+			return;
+		}
+
+		switch(dataType)
+		{
+			case oscium::WiPryClarity::DataType::RSSI_2_4GHZ:
+				freqLow = freqLow2;
+				freqHigh = freqHigh2;
+				rssi2_4GHzFrameCount++;
+				break;
+			case oscium::WiPryClarity::DataType::RSSI_5GHZ:
+				freqLow = freqLow5;
+				freqHigh = freqHigh5;
+				rssi5GHzFrameCount++;
+				break;
+			case oscium::WiPryClarity::DataType::RSSI_6E:
+				freqLow = freqLow6;
+				freqHigh = freqHigh6;
+				rssi6EFrameCount++;
+				break;
+			default:
+				std::cerr << "Unknown data type received." << std::endl;
+				return;
+		}
+
+		if( csvmode ){
+			dumpRSSI_csv(dataType, rssiData, freqLow, freqHigh, timens);
+		} else {
+			dumpRSSI_lp(dataType, rssiData, freqLow, freqHigh, timens);
+		}
+		rcvCount++;
+		if( rcvLimit > 0 && rcvCount >= rcvLimit ) {
+			std::cerr << "Received " << rcvCount << " frames. Stopping data stream." << std::endl;
+			run = false;
+		}
 	}
 };
 
 
-void sig_handler (int param)
+static void sig_handler (int param)
 {
   run = false;
 }
@@ -216,24 +278,27 @@ void sig_handler (int param)
 void helptext() {
         std::cout << "Outputs Oscium WiPry spectrum analysis data in Influx Line Protocol format" << std::endl;
         std::cout << std::endl;
-	std::cout << "Usage:" << std::endl;
-	std::cout << std::endl;
-        std::cout << "    wipry-lp -[2|5|6]" << std::endl;
+		std::cout << "Usage:" << std::endl;
+		std::cout << std::endl;
+        std::cout << "    wipry-lp -[2|5|6] [-n N]" << std::endl;
         std::cout << std::endl;
         std::cout << "Options:" << std::endl;
-	std::cout << "	-2		Run on the 2.4GHz Band" << std::endl;
-	std::cout << "	-5		Run on the 5GHz Band" << std::endl;
-	std::cout << "	-6		Run on the 6GHz Band" << std::endl;
+		std::cout << "	-2		Run on the 2.4GHz Band" << std::endl;
+		std::cout << "	-5		Run on the 5GHz Band" << std::endl;
+		std::cout << "	-6		Run on the 6GHz Band" << std::endl;
         //Not yet implemented.  Supported by libWiPryClarity, but requires special handling of non-contiguous spectrum data
 	//std::cout << "	-D		Run on both the 2.4GHz and 5GHz Band" << std::endl;
         //Not yet implemented.  ToDo: Requires logic to manually switch between bands while running
 	//std::cout << "	-T		Run on all three bands" << std::endl;
-	std::cout << "	-h		Print this help text and exit." << std::endl;
+		std::cout << "	-c		CSV output instead of line protocol." << std::endl;
+		std::cout << "	-h		Print this help text and exit." << std::endl;
+		std::cout << "	-n	N	Stop after N scans." << std::endl;
 
         std::cout << std::endl;
         std::cout << std::endl;
-        std::cout << "Built by Bryan Ward, based on sample code graciously provided by Matt Lee from Oscium" << std::endl;
-        std::cout << "wipry-lp Version " << VERSION << std::endl;
+        std::cout << "Originally built by Bryan Ward, based on sample code graciously provided by Matt Lee from Oscium." << std::endl;
+        std::cout << "" << std::endl;
+        std::cout << "wipry-csv Version " << VERSION << std::endl;
         //std::cout << "Build Date " << __BUILDTIMESTAMP__ << std::endl;
         std::cout << "libWiPryClarity version " << oscium::WiPryClarity::getVersion() << std::endl;
         std::cout << "Copyright (c) 2023 Matt Lee and Bryan Ward" << std::endl;
@@ -244,50 +309,56 @@ MyDelegate delegate;
 
 int main(int argc, char *argv[]) {
 
+	int c;
+	int ntimes;
+	bool csvmode = false;
+
 	if (argc <= 1) {
 		std::cerr << "No band specified!" << std::endl;
 		helptext();
 		return 1;
 	}
 
-	if (argc > 2) {
-		std::cerr << "Specify only one argument!" << std::endl;
-		helptext();
-		return 1;
-	}
-
-	if (argc == 2) {
-		if (strcmp(argv[1], "-h") == 0) {
-			helptext();
-			return 0;
-		}
-		else if (strcmp(argv[1], "-2") == 0) {
-			band = 2;
-		}
-		else if (strcmp(argv[1], "-5") == 0) {
-			band = 5;
-		}
-		else if (strcmp(argv[1], "-6") == 0) {
-			band = 6;
-		}
-		else if (strcmp(argv[1], "-D") == 0) {
-			band = 25;
-		}
-		//else if (strcmp(argv[1], "-T") == 0) {
-		//	band = 256;
-		//	std::cerr << "Not Yet Implemented!" << std::endl;
-		//	return 2;
-		//}
-		else {
-			std::cerr << "Invalid Argument Specified!" << std::endl;
-			helptext();
-			return 1;
+	// getopt
+	ntimes = 0;
+	while((c = getopt(argc, argv, "chD256n:")) != -1) {
+		switch(c) {
+			case 'h':
+				helptext();
+				return 0;
+			case '2':
+				band = 2;
+				break;
+			case '5':
+				band = 5;
+				break;
+			case '6':
+				band = 6;
+				break;
+			case 'D':
+				band = 25;
+				break;
+			case 'c':
+				csvmode = true;
+				break;
+			case 'n':
+				ntimes = atoi(optarg);
+				if (ntimes < 0) {
+					std::cerr << "Invalid number of times specified!" << std::endl;
+					helptext();
+					return 1;
+				}
+				break;
+			default:
+				std::cerr << "Invalid Argument Specified!" << std::endl;
+				helptext();
+				return 1;
 		}
 	}
 
 	wipryClarity = new WiPryClarity();
 	wipryClarity->setDelegate(&delegate);
-
+	delegate.setCsvMode(csvmode);
 
 	// start the connection
 	std::cerr<< "Starting connection process." << std::endl;
@@ -299,7 +370,7 @@ int main(int argc, char *argv[]) {
 		std::cerr<< "Error: Unable to connect to the WiPryClarity. Make sure that the device has been connected." << std::endl;
 		delete wipryClarity;
 		wipryClarity = nullptr;
-		return -1;
+		return 1;
 	}
 
 	// wait for the connection prcoess to complete
@@ -312,11 +383,11 @@ int main(int argc, char *argv[]) {
 	{
 		std::cerr<< "Connection Success." << std::endl;
 		serial = wipryClarity->getSerialNumber();
-		std::cerr<< "Serial Number: " << serial;
+		std::cerr<< "Serial Number: " << serial << std::endl;
 	} else {
 		// connection failed
 		delete wipryClarity;
-		return -1;
+		return 1;
 	}
 
 	[[maybe_unused]] void (*sigint_handler)(int);
@@ -326,6 +397,8 @@ int main(int argc, char *argv[]) {
 	[[maybe_unused]] void (*sigabrt_handler)(int);
 	sigabrt_handler = signal(SIGABRT, sig_handler);
 
+
+	delegate.setRcvLimit(ntimes); // set to 0 for infinite
 
 	if (band == 2) {
 		// start 2.4 Ghz Rssi data
@@ -353,8 +426,8 @@ int main(int argc, char *argv[]) {
 
 	while (run) {
 	    std::this_thread::yield();
-            //Prevent CPU spinlock
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		//Prevent CPU spinlock
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
        }
 
 
@@ -371,7 +444,6 @@ int main(int argc, char *argv[]) {
 		wipryClarity->endCommunication();
 	delete wipryClarity;
 	wipryClarity = nullptr;
-
 
 	return 0;
 }
