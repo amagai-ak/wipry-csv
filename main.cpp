@@ -192,7 +192,7 @@ public:
 	// RSSIをCSV形式で出力する
 	// CSVは，count, timestamp, band, freq_low, freq_high, step, points, rssi1, rssi2, ...
 	void dumpRSSI_csv(WiPryClarity::DataType dataType, std::vector<float> rssiData, float freqLow, float freqHigh, long long timens) {
-		float stepsize = ( (freqHigh - freqLow) / (int)rssiData.size() );
+		float stepsize = (freqHigh - freqLow) / ((int)rssiData.size() - 1);
 		double time_s = (double)timens / 1000000000.0;
 		std::cout << rcvCount << ",";
 		// time_sは，小数点以下3桁まで表示
@@ -280,7 +280,7 @@ void helptext() {
         std::cout << std::endl;
 		std::cout << "Usage:" << std::endl;
 		std::cout << std::endl;
-        std::cout << "    wipry-lp -[2|5|6] [-n N]" << std::endl;
+        std::cout << "    wipry-csv -[2|5|6] [-n N]" << std::endl;
         std::cout << std::endl;
         std::cout << "Options:" << std::endl;
 		std::cout << "	-2		Run on the 2.4GHz Band" << std::endl;
