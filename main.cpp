@@ -193,10 +193,10 @@ public:
 	// CSVは，count, timestamp, band, freq_low, freq_high, step, points, rssi1, rssi2, ...
 	void dumpRSSI_csv(WiPryClarity::DataType dataType, std::vector<float> rssiData, float freqLow, float freqHigh, long long timens) {
 		float stepsize = ( (freqHigh - freqLow) / (int)rssiData.size() );
-		double time_ms = (double)timens / 1000000.0;
+		double time_s = (double)timens / 1000000000.0;
 		std::cout << rcvCount << ",";
-		// time_msは，小数点以下3桁まで表示
-		std::cout << std::fixed << std::setprecision(3) << time_ms << ",";
+		// time_sは，小数点以下3桁まで表示
+		std::cout << std::fixed << std::setprecision(3) << time_s << ",";
 		switch (dataType)
 		{
 			case oscium::WiPryClarity::DataType::RSSI_2_4GHZ:
